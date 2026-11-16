@@ -1,0 +1,8 @@
+{
+  "name": "PULSO Sneakers",
+  "description": "Plataforma de e-commerce especializada em tênis masculinos, femininos e infantis. Seu estilo. Seu ritmo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
