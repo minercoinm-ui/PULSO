@@ -148,7 +148,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string): Promise<Profile> => {
     const supa = getSupabaseClient();
-    if (supa && systemStatus?.auth_mode === 'supabase') {
+    if (supa && systemStatus?.auth_mode !== 'local') {
       const { data, error } = await supa.auth.signInWithPassword({ email, password });
       if (error || !data.session) throw new Error(error?.message || 'Erro no login.');
       setStoredToken(data.session.access_token);

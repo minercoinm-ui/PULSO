@@ -302,6 +302,9 @@ export interface SystemStatus {
   supabase_diagnostic?: string | null;
   env_status?: {
     effective_supabase_url: string | null;
+    project_ref?: string | null;
+    urls_match?: boolean;
+    keys_match_project?: boolean;
     vite_supabase_url_configured: boolean;
     vite_supabase_anon_key_configured: boolean;
     supabase_url_configured: boolean;
