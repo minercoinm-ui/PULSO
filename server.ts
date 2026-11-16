@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import {createServer as createHttpServer} from 'node:http';
 import multer from 'multer';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
@@ -80,6 +81,7 @@ const upload = multer({
 async function startServer() {
   await ensureSupabaseSeeded();
   const app = express();
+  const httpServer = createHttpServer(app);
 
   app.use(express.json({ limit: '4mb' }));
 
@@ -664,7 +666,10 @@ async function startServer() {
   // ========================================================================
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: { server: httpServer },
+        ws: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -676,7 +681,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`PULSO Sneakers server running on http://0.0.0.0:${PORT}`);
   });
 }
