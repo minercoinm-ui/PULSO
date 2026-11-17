@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import type {
   Address,
@@ -29,7 +30,9 @@ import { getSupabaseAdmin, isSupabaseConfigured } from './supabaseAdmin.js';
 export const PRODUCT_MEDIA_BUCKET = 'produto-media';
 export const BANNERS_BUCKET = 'banners';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'pulso-data')
+  : path.resolve(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'pulso_db.json');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 
@@ -1367,10 +1370,12 @@ export async function adminDeleteProduct(productId: string): Promise<void> {
   writeLocalDb(db);
 }
 
-export async function saveUploadedProductMedia(params: {
+async function persistMediaMetadata(params: {
+  supa: Awaited<ReturnType<typeof getActiveSupabase>>;
   productId: string | null;
   kind: 'image' | 'video' | 'banner';
-  buffer: Buffer;
+  storagePath: string;
+  publicUrl: string;
   originalName: string;
   mimeType: string;
   fileSize: number;
@@ -1382,34 +1387,8 @@ export async function saveUploadedProductMedia(params: {
   imageRecord?: ProductImage;
   videoRecord?: ProductVideo;
 }> {
-  const safeExt = path.extname(params.originalName).toLowerCase() || (params.kind === 'video' ? '.mp4' : '.jpg');
-  const fileId = crypto.randomUUID();
-  const folder =
-    params.kind === 'banner'
-      ? 'banners'
-      : `products/${params.productId || 'campaigns'}`;
-  const storagePath = `${folder}/${fileId}${safeExt}`;
   const now = new Date().toISOString();
-
-  let publicUrl = '';
-  const supa = await getActiveSupabase();
-
-  if (supa) {
-    const bucket = params.kind === 'banner' ? BANNERS_BUCKET : PRODUCT_MEDIA_BUCKET;
-    const { error: uploadErr } = await supa.storage.from(bucket).upload(storagePath, params.buffer, {
-      contentType: params.mimeType,
-      upsert: false,
-    });
-    if (uploadErr) throw new Error(`Falha no Supabase Storage: ${uploadErr.message}`);
-    const { data: pub } = supa.storage.from(bucket).getPublicUrl(storagePath);
-    publicUrl = pub.publicUrl;
-  } else {
-    const targetDir = path.join(UPLOADS_DIR, folder);
-    fs.mkdirSync(targetDir, { recursive: true });
-    const fullDiskPath = path.join(UPLOADS_DIR, storagePath);
-    fs.writeFileSync(fullDiskPath, params.buffer);
-    publicUrl = `/uploads/${storagePath}`;
-  }
+  const { supa, publicUrl, storagePath } = params;
 
   if (params.kind === 'banner') {
     return { public_url: publicUrl, storage_path: storagePath };
@@ -1463,7 +1442,6 @@ export async function saveUploadedProductMedia(params: {
     return { public_url: publicUrl, storage_path: storagePath, imageRecord };
   }
 
-  // Video
   if (supa) {
     const { data, error } = await supa
       .from('product_videos')
@@ -1499,6 +1477,128 @@ export async function saveUploadedProductMedia(params: {
   db.product_videos.push(videoRecord);
   writeLocalDb(db);
   return { public_url: publicUrl, storage_path: storagePath, videoRecord };
+}
+
+export async function createSignedMediaUploadUrl(params: {
+  productId: string | null;
+  kind: 'image' | 'video' | 'banner';
+  originalName: string;
+}): Promise<{
+  supported: boolean;
+  signed_url?: string;
+  storage_path?: string;
+  public_url?: string;
+}> {
+  const supa = await getActiveSupabase();
+  if (!supa) {
+    return { supported: false };
+  }
+  const safeExt = path.extname(params.originalName).toLowerCase() || (params.kind === 'video' ? '.mp4' : '.jpg');
+  const fileId = crypto.randomUUID();
+  const folder =
+    params.kind === 'banner'
+      ? 'banners'
+      : `products/${params.productId || 'campaigns'}`;
+  const storagePath = `${folder}/${fileId}${safeExt}`;
+  const bucket = params.kind === 'banner' ? BANNERS_BUCKET : PRODUCT_MEDIA_BUCKET;
+
+  const { data, error } = await supa.storage.from(bucket).createSignedUploadUrl(storagePath);
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message || 'Não foi possível gerar URL assinada de upload.');
+  }
+  const { data: pub } = supa.storage.from(bucket).getPublicUrl(storagePath);
+  return {
+    supported: true,
+    signed_url: data.signedUrl,
+    storage_path: storagePath,
+    public_url: pub.publicUrl,
+  };
+}
+
+export async function commitUploadedProductMedia(params: {
+  productId: string | null;
+  kind: 'image' | 'video' | 'banner';
+  storagePath: string;
+  publicUrl: string;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  title?: string;
+  isCampaign?: boolean;
+}) {
+  const supa = await getActiveSupabase();
+  if (!supa) {
+    throw new Error('Commit direto requer Supabase Storage ativo.');
+  }
+  return persistMediaMetadata({
+    supa,
+    productId: params.productId,
+    kind: params.kind,
+    storagePath: params.storagePath,
+    publicUrl: params.publicUrl,
+    originalName: params.originalName,
+    mimeType: params.mimeType,
+    fileSize: params.fileSize,
+    title: params.title,
+    isCampaign: params.isCampaign,
+  });
+}
+
+export async function saveUploadedProductMedia(params: {
+  productId: string | null;
+  kind: 'image' | 'video' | 'banner';
+  buffer: Buffer;
+  originalName: string;
+  mimeType: string;
+  fileSize: number;
+  title?: string;
+  isCampaign?: boolean;
+}): Promise<{
+  public_url: string;
+  storage_path: string;
+  imageRecord?: ProductImage;
+  videoRecord?: ProductVideo;
+}> {
+  const safeExt = path.extname(params.originalName).toLowerCase() || (params.kind === 'video' ? '.mp4' : '.jpg');
+  const fileId = crypto.randomUUID();
+  const folder =
+    params.kind === 'banner'
+      ? 'banners'
+      : `products/${params.productId || 'campaigns'}`;
+  const storagePath = `${folder}/${fileId}${safeExt}`;
+
+  let publicUrl = '';
+  const supa = await getActiveSupabase();
+
+  if (supa) {
+    const bucket = params.kind === 'banner' ? BANNERS_BUCKET : PRODUCT_MEDIA_BUCKET;
+    const { error: uploadErr } = await supa.storage.from(bucket).upload(storagePath, params.buffer, {
+      contentType: params.mimeType,
+      upsert: false,
+    });
+    if (uploadErr) throw new Error(`Falha no Supabase Storage: ${uploadErr.message}`);
+    const { data: pub } = supa.storage.from(bucket).getPublicUrl(storagePath);
+    publicUrl = pub.publicUrl;
+  } else {
+    const targetDir = path.join(UPLOADS_DIR, folder);
+    fs.mkdirSync(targetDir, { recursive: true });
+    const fullDiskPath = path.join(UPLOADS_DIR, storagePath);
+    fs.writeFileSync(fullDiskPath, params.buffer);
+    publicUrl = `/uploads/${storagePath}`;
+  }
+
+  return persistMediaMetadata({
+    supa,
+    productId: params.productId,
+    kind: params.kind,
+    storagePath,
+    publicUrl,
+    originalName: params.originalName,
+    mimeType: params.mimeType,
+    fileSize: params.fileSize,
+    title: params.title,
+    isCampaign: params.isCampaign,
+  });
 }
 
 export async function reorderProductImages(productId: string, orderedImageIds: string[]): Promise<ProductImage[]> {

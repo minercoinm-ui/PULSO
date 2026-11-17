@@ -10,6 +10,22 @@ export function isMercadoPagoConfigured(): boolean {
   );
 }
 
+function getAppBaseUrl(): string {
+  const configured = (process.env.APP_URL || '').trim();
+  if (configured && configured !== 'MY_APP_URL') {
+    return configured.replace(/\/$/, '');
+  }
+  const vercelProd = (process.env.VERCEL_PROJECT_PRODUCTION_URL || '').trim();
+  if (vercelProd) {
+    return `https://${vercelProd.replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
+  }
+  const vercelPreview = (process.env.VERCEL_URL || '').trim();
+  if (vercelPreview) {
+    return `https://${vercelPreview.replace(/^https?:\/\//, '').replace(/\/$/, '')}`;
+  }
+  return 'http://localhost:3000';
+}
+
 export interface MercadoPagoPixResult {
   configured: boolean;
   payment_id?: string;
@@ -37,8 +53,8 @@ export async function createMercadoPagoPixPayment(order: Order): Promise<Mercado
     };
   }
 
-  const appUrl = (process.env.APP_URL || '').replace(/\/$/, '');
-  const notificationUrl = appUrl ? `${appUrl}/api/webhooks/mercadopago` : undefined;
+  const appUrl = getAppBaseUrl();
+  const notificationUrl = appUrl.startsWith('https://') ? `${appUrl}/api/webhooks/mercadopago` : undefined;
 
   const [firstName, ...restName] = (order.customer_name || 'Cliente Pulso').trim().split(/\s+/);
   const lastName = restName.join(' ') || 'Pulso';
@@ -97,7 +113,7 @@ export async function createMercadoPagoCardPreference(order: Order): Promise<Mer
     };
   }
 
-  const appUrl = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const appUrl = getAppBaseUrl();
   const notificationUrl = appUrl.startsWith('https://')
     ? `${appUrl}/api/webhooks/mercadopago`
     : undefined;
