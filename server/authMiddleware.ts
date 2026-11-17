@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { NextFunction, Request, Response } from 'express';
-import type { Profile } from '../src/types/ecommerce.js';
-import { findProfileById, getActiveSupabase } from './storeRepository.js';
+import type { Profile } from '../src/types/ecommerce.ts';
+import { findProfileById, getActiveSupabase } from './storeRepository.ts';
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'pulso-sneakers-dev-session-secret-2026';
 
