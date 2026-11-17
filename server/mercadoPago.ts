@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { Order } from '../src/types/ecommerce.js';
+import type { Order } from '../src/types/ecommerce.ts';
 
 export function isMercadoPagoConfigured(): boolean {
   const token = process.env.MERCADO_PAGO_ACCESS_TOKEN || '';
@@ -37,7 +37,7 @@ export async function createMercadoPagoPixPayment(order: Order): Promise<Mercado
     };
   }
 
-  const appUrl = (process.env.APP_URL || '').replace(/\/$/, '');
+  const appUrl = (process.env.APP_URL || process.env.URL || '').replace(/\/$/, '');
   const notificationUrl = appUrl ? `${appUrl}/api/webhooks/mercadopago` : undefined;
 
   const [firstName, ...restName] = (order.customer_name || 'Cliente Pulso').trim().split(/\s+/);
@@ -97,7 +97,7 @@ export async function createMercadoPagoCardPreference(order: Order): Promise<Mer
     };
   }
 
-  const appUrl = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const appUrl = (process.env.APP_URL || process.env.URL || 'http://localhost:3000').replace(/\/$/, '');
   const notificationUrl = appUrl.startsWith('https://')
     ? `${appUrl}/api/webhooks/mercadopago`
     : undefined;

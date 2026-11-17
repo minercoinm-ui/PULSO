@@ -23,8 +23,16 @@ import type {
   SiteSection,
   Supplier,
   SupplierProduct,
-} from '../src/types/ecommerce.js';
-import { getSupabaseAdmin, isSupabaseConfigured } from './supabaseAdmin.js';
+} from '../src/types/ecommerce.ts';
+import { getSupabaseAdmin, isSupabaseConfigured } from './supabaseAdmin.ts';
+import {
+  deleteBlobMedia,
+  getCachedBlobDb,
+  isBlobPersistence,
+  refreshBlobDb,
+  saveBlobMedia,
+  setCachedBlobDb,
+} from './localPersistence.ts';
 
 export const PRODUCT_MEDIA_BUCKET = 'produto-media';
 export const BANNERS_BUCKET = 'banners';
@@ -640,7 +648,28 @@ function ensureLocalDirs() {
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+/** Reloads the local fallback database from durable storage (Netlify Blobs) before a request. */
+export async function syncLocalDb(): Promise<void> {
+  await refreshBlobDb(createInitialLocalDb);
+}
+
+async function removeLocalMedia(storagePath: string) {
+  if (isBlobPersistence()) {
+    await deleteBlobMedia(storagePath);
+    return;
+  }
+  const fullDiskPath = path.join(UPLOADS_DIR, storagePath);
+  if (fs.existsSync(fullDiskPath)) fs.unlinkSync(fullDiskPath);
+}
+
 function readLocalDb(): LocalDatabase {
+  if (isBlobPersistence()) {
+    const cached = getCachedBlobDb<LocalDatabase>();
+    if (cached) return cached;
+    const initial = createInitialLocalDb();
+    setCachedBlobDb(initial);
+    return initial;
+  }
   ensureLocalDirs();
   if (!fs.existsSync(DB_PATH)) {
     const initial = createInitialLocalDb();
@@ -652,6 +681,10 @@ function readLocalDb(): LocalDatabase {
 }
 
 function writeLocalDb(db: LocalDatabase) {
+  if (isBlobPersistence()) {
+    setCachedBlobDb(db);
+    return;
+  }
   ensureLocalDirs();
   const tmpPath = `${DB_PATH}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf-8');
@@ -1403,6 +1436,9 @@ export async function saveUploadedProductMedia(params: {
     if (uploadErr) throw new Error(`Falha no Supabase Storage: ${uploadErr.message}`);
     const { data: pub } = supa.storage.from(bucket).getPublicUrl(storagePath);
     publicUrl = pub.publicUrl;
+  } else if (isBlobPersistence()) {
+    await saveBlobMedia(storagePath, params.buffer, params.mimeType);
+    publicUrl = `/uploads/${storagePath}`;
   } else {
     const targetDir = path.join(UPLOADS_DIR, folder);
     fs.mkdirSync(targetDir, { recursive: true });
@@ -1570,8 +1606,7 @@ export async function deleteProductImage(productId: string, imageId: string): Pr
   const db = readLocalDb();
   const img = db.product_images.find((i) => i.id === imageId && i.product_id === productId);
   if (img) {
-    const fullDiskPath = path.join(UPLOADS_DIR, img.storage_path);
-    if (fs.existsSync(fullDiskPath)) fs.unlinkSync(fullDiskPath);
+    await removeLocalMedia(img.storage_path);
   }
   db.product_images = db.product_images.filter((i) => i.id !== imageId);
   // Ensure another image becomes primary if the primary was removed
@@ -1596,8 +1631,7 @@ export async function deleteProductVideo(videoId: string): Promise<void> {
   const db = readLocalDb();
   const vid = db.product_videos.find((v) => v.id === videoId);
   if (vid) {
-    const fullDiskPath = path.join(UPLOADS_DIR, vid.storage_path);
-    if (fs.existsSync(fullDiskPath)) fs.unlinkSync(fullDiskPath);
+    await removeLocalMedia(vid.storage_path);
   }
   db.product_videos = db.product_videos.filter((v) => v.id !== videoId);
   writeLocalDb(db);
@@ -1799,8 +1833,7 @@ export async function deleteBanner(id: string): Promise<void> {
   const db = readLocalDb();
   const banner = db.banners.find((b) => b.id === id);
   if (banner?.storage_path) {
-    const fullDiskPath = path.join(UPLOADS_DIR, banner.storage_path);
-    if (fs.existsSync(fullDiskPath)) fs.unlinkSync(fullDiskPath);
+    await removeLocalMedia(banner.storage_path);
   }
   db.banners = db.banners.filter((b) => b.id !== id);
   writeLocalDb(db);
